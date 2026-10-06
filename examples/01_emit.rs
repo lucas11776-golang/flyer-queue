@@ -17,7 +17,7 @@ pub async fn main() {
         .read()
         .unwrap();
 
-    let mut count: i64 = 0;
+    let mut count = 0;
 
     loop {
         queue

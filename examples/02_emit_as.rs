@@ -3,7 +3,6 @@ use std::sync::{Arc, LazyLock, RwLock};
 use flyer_event_emitter::EventEmitter;
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Notification {
     pub identify: String,
@@ -19,21 +18,21 @@ pub async fn main() {
         .read()
         .unwrap()
         .subscribe_as::<Notification, _>(Arc::from("notification.mail"), async |payload| {
-            println!("\r\n\r\n{:?}", payload);
+            println!("\r\n{:?}", payload);
         });
 
     let _sub_mobile = QUEUE
         .read()
         .unwrap()
         .subscribe_as::<Notification, _>(Arc::from("notification.mobile"), async |payload| {
-            println!("\r\n\r\n{:?}", payload);
+            println!("\r\n{:?}", payload);
         });
 
     let queue = QUEUE
         .read()
         .unwrap();
 
-    let mut count: i64 = 0;
+    let mut count = 0;
 
     loop {
         if count % 2 == 0 {
