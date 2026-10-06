@@ -3,13 +3,13 @@ mod test_queue {
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use flyer_queue::Queue;
+    use flyer_event_emitter::EventEmitter;
     use serde::{Deserialize, Serialize};
     use tokio::sync::mpsc;
     
     #[tokio::test]
     pub async fn test_emit_event() {
-        let queue = Queue::new();
+        let queue = EventEmitter::new();
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let _subscription = queue.subscribe(Arc::from("event"), move |payload: Bytes| {
@@ -35,7 +35,7 @@ mod test_queue {
             pub body: String,
         }
 
-        let queue = Queue::with_max_in_flight(1_0000);
+        let queue = EventEmitter::with_max_in_flight(1_0000);
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let _subscription = queue.subscribe_as::<Notification, _>("notification.email".into(), move |payload| {
@@ -67,7 +67,7 @@ mod test_queue {
             pub email: String,
         }
 
-        let queue = Queue::new();
+        let queue = EventEmitter::new();
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let _subscription = queue.subscribe_as::<User, _>("users.*.created".into(), move |payload| {

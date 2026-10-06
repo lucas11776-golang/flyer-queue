@@ -6,9 +6,10 @@ use std::sync::{Arc, Mutex};
 
 use ahash::RandomState as FastHasher;
 use arc_swap::ArcSwap;
-use bytes::Bytes;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::Semaphore;
+
+pub use bytes::Bytes;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -21,7 +22,7 @@ static NEXT_SUB_ID: AtomicU64 = AtomicU64::new(1);
 pub struct Subscription {
     pub id: u64,
     pub event: Arc<str>,
-    pub queue: Arc<Queue>,
+    pub queue: Arc<EventEmitter>,
 }
 
 impl Drop for Subscription {
@@ -107,13 +108,13 @@ impl TrieNode {
     }
 }
 
-pub struct Queue {
+pub struct EventEmitter {
     root: ArcSwap<TrieNode>,
     write_lock: Mutex<()>,
     limiter: Option<Arc<Semaphore>>,
 }
 
-impl Queue {
+impl EventEmitter {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             root: ArcSwap::from_pointee(TrieNode::default()),

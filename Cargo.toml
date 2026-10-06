@@ -1,5 +1,5 @@
 [package]
-name = "flyer-queue"
+name = "flyer-event-emitter"
 version = "0.0.0"
 authors = ["Themba Lucas Ngubeni <thembangubeni04@email.com>"]
 license = "MIT"
