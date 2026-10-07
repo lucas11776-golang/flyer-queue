@@ -1,13 +1,12 @@
-
-
-
-
 #[cfg(test)]
 mod test_benchmark_queue {
-    use std::{sync::{Arc, atomic::{AtomicU64, Ordering}}, time::Duration};
+    use std::{
+        sync::{Arc, atomic::{AtomicU64, Ordering}},
+        time::Duration
+    };
 
     use bytes::Bytes;
-    use flyer_event_emitter::{EventEmitter, Subscription};
+    use flyer_event_emitter::EventEmitter;
     use tokio::{sync::mpsc, time::{sleep, timeout}};
 
     #[tokio::test]
