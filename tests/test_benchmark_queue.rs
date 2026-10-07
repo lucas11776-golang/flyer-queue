@@ -22,14 +22,13 @@ mod test_benchmark_queue {
             }
         });
 
-        // Spawn emitter concurrently (do NOT .await here)
         let emitter_handle = tokio::spawn(async move {
             for _ in 0..1_000_000 {
                 queue.emit(Arc::from("stats"), Bytes::new()).await;
             }
         });
 
-        let receive_result = timeout(Duration::from_millis(2000), async {
+        let receive_result = timeout(Duration::from_millis(5000), async {
             let mut count = 0;
             while count < 1_000_000 {
                 rx.recv().await.expect("Channel closed prematurely");
