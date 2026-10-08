@@ -1,6 +1,6 @@
 [package]
 name = "flyer-event-emitter"
-version = "0.0.0"
+version = "0.0.1"
 authors = ["Themba Lucas Ngubeni <thembangubeni04@email.com>"]
 license = "MIT"
 description = "FlyerQueue is simple queuing package"

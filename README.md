@@ -1,174 +1,284 @@
-# Flyer Event Emitter
+# Flyer Event Emitter (`flyer-event-emitter`)
 
-A high-performance, asynchronous event emitter for Rust, featuring Trie-based topic matching, single-level wildcards, and seamless serialization.
+A blazing-fast, asynchronous event emitter for Rust built on top of `tokio`. It features **Trie-based topic matching**, **single-level wildcards**, **seamless serialization via `serde` and `bincode`**, and **RAII automatic subscription cleanup**.
+
+---
 
 ## Features
 
-- **Asynchronous**: Built on top of `tokio` for efficient async/await support.
-- **Trie-based Routing**: Efficient topic matching for high-performance event dispatching.
-- **Wildcard Support**: Subscribe to patterns using `*` (e.g., `orders.*.created`).
-- **Type Safety**: Built-in support for serializing and deserializing types using `serde` and `bincode`.
-- **Concurrency Control**: Optional semaphore-based limiting for in-flight event processing.
-- **RAII Subscriptions**: Subscriptions are automatically removed when they go out of scope.
+- **Asynchronous (`tokio`)**: Fully non-blocking event publishing and handling powered by Tokio tasks.
+- **Trie-Based Routing**: Fast, segment-by-segment topic routing for high-throughput event dispatching.
+- **Wildcard Subscriptions**: Subscribe to flexible topic patterns using `*` (e.g., `users.*.created`).
+- **Type Safety**: Native support for strongly typed events using `serde` and `bincode`.
+- **Concurrency Control**: Optional semaphore-based limiting (`with_max_in_flight`) to protect downstream services from overload.
+- **RAII Subscriptions**: Subscriptions automatically unregister themselves when the `Subscription` guard goes out of scope.
+
+---
 
 ## Installation
 
-Add this to your `Cargo.toml`:
+Add `flyer-event-emitter` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-flyer-event-emitter = "0.0.0" # Replace with actual version
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-bytes = "1"
+flyer-event-emitter = "0.0.1" # Or specify the path / git repository
+tokio = { version = "1.53.1", features = ["full"] }
+serde = { version = "1.0.229", features=["derive"] }
+bytes = "1.12.1"
+bincode = "1.3.3"
 ```
 
-## Quick Start
+---
 
-### Basic Usage
+## Usage Guide & Examples
 
-Use raw `Bytes` for maximum flexibility and performance.
+### 1. Basic Emission (`Bytes`)
+For maximum performance and flexibility, you can emit and subscribe to raw `Bytes`.
 
 ```rust
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, RwLock};
 use flyer_event_emitter::{EventEmitter, Bytes};
 
+static QUEUE: LazyLock<RwLock<Arc<EventEmitter>>> = LazyLock::new(|| RwLock::new(EventEmitter::new()));
+
 #[tokio::main]
-async fn main() {
-    let emitter = EventEmitter::new();
+pub async fn main() {
+    let _subscription = QUEUE
+        .read()
+        .unwrap()
+        .subscribe(Arc::from("count"), async |payload: Bytes| {
+            println!("Received: {}", String::from_utf8_lossy(&payload));
+        });
 
-    // Subscribe to a topic
-    let _sub = emitter.subscribe(Arc::from("log.info"), |payload: Bytes| async move {
-        println!("Received: {}", String::from_utf8_lossy(&payload));
-    });
+    let queue = QUEUE.read().unwrap();
+    let mut count = 0;
 
-    // Emit an event
-    emitter.emit(Arc::from("log.info"), Bytes::from("Hello, World!")).await;
+    loop {
+        queue
+            .emit(Arc::from("count"), Bytes::from(format!("{}", count)))
+            .await;
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        count += 1;
+    }
 }
 ```
 
-### Typed Events
+---
 
-Easily emit and subscribe to complex data structures using `serde`.
+### 2. Type-Safe Events (`emit_as` & `subscribe_as`)
+Easily pass structured data across your application using `serde` serialization.
 
 ```rust
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, RwLock};
 use flyer_event_emitter::EventEmitter;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
-struct UserAction {
-    user_id: u32,
-    action: String,
+pub struct Notification {
+    pub identify: String,
+    pub title: String,
+    pub body: String,
 }
 
+static QUEUE: LazyLock<RwLock<Arc<EventEmitter>>> = LazyLock::new(|| RwLock::new(EventEmitter::new()));
+
 #[tokio::main]
-async fn main() {
-    let emitter = EventEmitter::new();
+pub async fn main() {
+    let _sub_mail = QUEUE
+        .read()
+        .unwrap()
+        .subscribe_as::<Notification, _>(Arc::from("notification.mail"), async |payload| {
+            println!("\nMail Notification: {:?}", payload);
+        });
 
-    let _sub = emitter.subscribe_as::<UserAction, _>(Arc::from("user.activity"), |payload| async move {
-        println!("User {} performed: {}", payload.user_id, payload.action);
-    });
+    let _sub_mobile = QUEUE
+        .read()
+        .unwrap()
+        .subscribe_as::<Notification, _>(Arc::from("notification.mobile"), async |payload| {
+            println!("\nMobile Notification: {:?}", payload);
+        });
 
-    emitter.emit_as(Arc::from("user.activity"), &UserAction {
-        user_id: 42,
-        action: "login".to_string(),
-    }).await;
+    let queue = QUEUE.read().unwrap();
+    let mut count = 0;
+
+    loop {
+        if count % 2 == 0 {
+            queue
+                .emit_as(Arc::from("notification.mail"), &Notification {
+                    identify: String::from("jeo@doe.com"),
+                    title: String::from("New notification"),
+                    body: format!("Hello event {}", count + 1),
+                })
+                .await;
+        } else {
+            queue
+                .emit_as(Arc::from("notification.mobile"), &Notification {
+                    identify: String::from("+27745932487"),
+                    title: String::new(),
+                    body: format!("Hello count {}", count + 1),
+                })
+                .await;
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        count += 1;
+    }
 }
 ```
 
-### Wildcard Subscriptions
+---
 
-Use `*` to match any single segment in a topic path.
-
-```rust
-use std::sync::Arc;
-use flyer_event_emitter::EventEmitter;
-
-#[tokio::main]
-async fn main() {
-    let emitter = EventEmitter::new();
-
-    // Matches 'sensor.1.temp', 'sensor.room_a.temp', etc.
-    let _sub = emitter.subscribe(Arc::from("sensor.*.temp"), |payload| async move {
-        println!("Temperature update received");
-    });
-
-    emitter.emit(Arc::from("sensor.kitchen.temp"), "22.5".into()).await;
-}
-```
-
-## Detailed Example: Multi-Service Architecture
-
-This example demonstrates how `flyer-event-emitter` can be used to coordinate multiple services using wildcards and typed events.
+### 3. Wildcard Subscriptions (`*`)
+Use `*` to match any single segment within a dot-separated topic path.
 
 ```rust
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, RwLock};
 use flyer_event_emitter::EventEmitter;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Order {
-    id: u64,
-    item: String,
-    status: String,
+pub struct User {
+    pub id: u64,
+    pub email: String,
+}
+
+static QUEUE: LazyLock<RwLock<Arc<EventEmitter>>> = LazyLock::new(|| RwLock::new(EventEmitter::new()));
+
+#[tokio::main]
+pub async fn main() {
+    // Subscribes to any event matching `users.<anything>.created`
+    let _sub = QUEUE
+        .read()
+        .unwrap()
+        .subscribe_as::<User, _>(Arc::from("users.*.created"), async |payload| {
+            println!("\nUser Created Event: {:?}", payload);
+        });
+
+    let queue = QUEUE.read().unwrap();
+    let mut count = 0;
+
+    loop {
+        queue
+            .emit_as(Arc::from(format!("users.{}.created", count + 1)), &User {
+                id: count + 1,
+                email: format!("jeo-{}@doe.com", count + 1),
+            })
+            .await;
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        count += 1;
+    }
+}
+```
+
+---
+
+### 4. Best Practice: Global Event Bus Module Pattern
+In real-world applications, wrapping your `EventEmitter` in a clean module API with helper functions provides ergonomic access across your codebase.
+
+```rust
+use std::sync::{Arc, LazyLock};
+use flyer_event_emitter::{Bytes, EventEmitter, Subscription, AsyncCallback};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use tokio::sync::RwLock;
+
+static QUEUE: LazyLock<RwLock<Arc<EventEmitter>>> = LazyLock::new(|| RwLock::new(EventEmitter::new()));
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Notification {
+    pub identifier: String,
+    pub title: String,
+    pub message: String,
+}
+
+pub async fn emit(event: &str, payload: Bytes) {
+    QUEUE.read().await.emit(Arc::from(event), payload).await;
+}
+
+pub async fn subscribe<C>(event: &str, callback: C) -> Subscription
+where
+    C: AsyncCallback<Bytes>,
+{
+    QUEUE.read().await.subscribe(Arc::from(event), callback)
+}
+
+pub async fn emit_as<J>(event: &str, payload: &J)
+where
+    J: Serialize,
+{
+    QUEUE.read().await.emit_as(Arc::from(event), payload).await;
+}
+
+pub async fn subscribe_as<J, C>(event: &str, callback: C) -> Subscription
+where
+    J: DeserializeOwned + Send + 'static,
+    C: AsyncCallback<J>,
+{
+    QUEUE.read().await.subscribe_as(Arc::from(event), callback)
 }
 
 #[tokio::main]
-async fn main() {
-    // 1. Initialize the shared event emitter (usually stored in a global state or Arc)
-    let emitter = EventEmitter::new();
-
-    // 2. Monitoring Service: Subscribes to ALL order events using a wildcard
-    // Matches 'orders.created', 'orders.updated', 'orders.deleted', etc.
-    let _monitor = emitter.subscribe_as::<Order, _>(Arc::from("orders.*"), |order| async move {
-        println!("[Monitor] Order {} status changed to: {}", order.id, order.status);
+pub async fn main() {
+    let _sub_mail = subscribe_as::<Notification, _>("notification.mail", async |payload| {
+        println!("\nSending mail message: {:?}", payload);
     });
 
-    // 3. Analytics Service: Specifically interested in 'created' events
-    let _analytics = emitter.subscribe_as::<Order, _>(Arc::from("orders.created"), |order| async move {
-        println!("[Analytics] New order placed for: {}", order.item);
+    let _sub_mobile = subscribe_as::<Notification, _>("notification.mobile", async |payload| {
+        println!("\nSending mobile message: {:?}", payload);
     });
 
-    // 4. Emit events
-    println!("--- Emitting orders.created ---");
-    emitter.emit_as(Arc::from("orders.created"), &Order {
-        id: 101,
-        item: "Laptop".to_string(),
-        status: "pending".to_string(),
-    }).await;
+    let mut count = 0;
 
-    // Small delay to allow async tasks to process (in real apps, the emitter handles this)
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    loop {
+        if count % 2 == 0 {
+            emit_as("notification.mail", &Notification {
+                identifier: String::from("jeo@doe.com"),
+                title: String::from("New notification"),
+                message: format!("Hello event {}", count + 1),
+            })
+            .await;
+        } else {
+            emit_as("notification.mobile", &Notification {
+                identifier: String::from("+27745932487"),
+                title: String::new(),
+                message: format!("Hello count {}", count + 1),
+            })
+            .await;
+        }
 
-    println!("\n--- Emitting orders.updated ---");
-    emitter.emit_as(Arc::from("orders.updated"), &Order {
-        id: 101,
-        item: "Laptop".to_string(),
-        status: "shipped".to_string(),
-    }).await;
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        count += 1;
+    }
 }
 ```
+
+---
 
 ## Advanced Configuration
 
-### Limiting Concurrency
-
-If you are processing high volumes of events and want to avoid overwhelming your system, you can limit the number of concurrent tasks:
+### Limiting In-Flight Concurrency
+If your event handlers perform heavy I/O or CPU operations and you want to prevent system overload, you can restrict concurrent executions using `with_max_in_flight`:
 
 ```rust
-let emitter = EventEmitter::with_max_in_flight(100); // Only 100 concurrent handlers
+use flyer_event_emitter::EventEmitter;
+use std::sync::Arc;
+
+// Limits concurrent handler task execution to 100
+let emitter: Arc<EventEmitter> = EventEmitter::with_max_in_flight(100);
 ```
 
-## How it Works
+---
 
-1. **Trie Storage**: Topics are stored in a Trie structure. Each segment of a dot-separated topic (e.g., `a.b.c`) is a node in the tree.
-2. **Subscription Management**: When you `subscribe`, a unique handler ID is generated and stored in the corresponding Trie node.
-3. **Event Dispatching**: When you `emit`, the emitter traverses the Trie to find all matching handlers (including those matching wildcard nodes) and spawns them as asynchronous tasks.
-4. **Memory Safety**: The Trie uses `ArcSwap` and `Arc` to ensure thread-safe, lock-free reads, while `Mutex` protects updates (subscriptions/unsubscriptions).
+## How It Works
+
+1. **Trie Storage**: Topics are segmented by dots (`.`) and stored in a hierarchical Trie structure.
+2. **Subscription Management**: Subscriptions generate a unique handler ID registered at the corresponding Trie node.
+3. **Event Dispatching**: Emitting an event traverses the Trie, matching both exact nodes and single-level wildcards (`*`), then spawns asynchronous Tokio worker tasks.
+4. **Thread Safety**: Built using `ArcSwap` and `Arc` for lock-free, ultra-fast concurrent reads, with a fine-grained `Mutex` for subscription updates.
+
+---
 
 ## License
 
-MIT
+Licensed under the [MIT License](LICENSE).
